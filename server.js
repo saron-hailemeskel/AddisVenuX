@@ -1,9 +1,8 @@
-require("dotenv").config();
-
+const env = require("./backend/src/config/env");
 const app = require("./backend/src/app");
 
-const PORT = process.env.PORT || 5000;
+const PORT = env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log(`AddisVenuX API running on port ${PORT}`);
+  console.log(`AddisVenuX API running in ${env.NODE_ENV} mode on port ${PORT}`);
 });
