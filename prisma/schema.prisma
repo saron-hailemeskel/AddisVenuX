@@ -1,0 +1,214 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// -----------------------------------------------------
+// ENUMS
+// -----------------------------------------------------
+enum PlatformRole {
+  USER
+  PLATFORM_ADMIN
+}
+
+enum OrgRole {
+  OWNER
+  ADMIN
+  STAFF
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+  COMPLETED
+}
+
+enum TicketTierStatus {
+  ACTIVE
+  PAUSED
+  SOLD_OUT
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  EXPIRED
+}
+
+enum TicketStatus {
+  VALID
+  USED
+  CANCELLED
+}
+
+// -----------------------------------------------------
+// USERS & MULTI-TENANCY
+// -----------------------------------------------------
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String
+  fullName     String
+  phoneNumber  String?
+  role         PlatformRole  @default(USER)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  memberships  OrganizationMember[]
+  orders       Order[]
+  validations  Ticket[]             @relation("CheckedInBy")
+
+  @@index([email])
+}
+
+model Organization {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  description String?
+  logoUrl     String?
+  phoneNumber String?
+  email       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members     OrganizationMember[]
+  events      Event[]
+
+  @@index([slug])
+}
+
+model OrganizationMember {
+  id             String       @id @default(uuid())
+  organizationId String
+  userId         String
+  role           OrgRole      @default(STAFF)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@index([organizationId])
+}
+
+// -----------------------------------------------------
+// EVENTS & TICKETING
+// -----------------------------------------------------
+model Event {
+  id             String       @id @default(uuid())
+  organizationId String
+  title          String
+  slug           String       @unique
+  description    String?
+  category       String       // e.g. "TECH", "MUSIC", "CULTURE"
+  venueName      String
+  address        String?
+  city           String       @default("Addis Ababa")
+  bannerUrl      String?
+  startDateTime  DateTime
+  endDateTime    DateTime
+  status         EventStatus  @default(DRAFT)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ticketTiers    TicketTier[]
+  orders         Order[]
+  tickets        Ticket[]
+
+  @@index([organizationId])
+  @@index([status, startDateTime])
+  @@index([category])
+  @@index([city])
+}
+
+model TicketTier {
+  id                String           @id @default(uuid())
+  eventId           String
+  name              String           // e.g. "Early Bird", "VIP"
+  description       String?
+  price             Decimal          @db.Decimal(10, 2)
+  totalCapacity     Int
+  availableCapacity Int
+  maxPerOrder       Int              @default(5)
+  status            TicketTierStatus @default(ACTIVE)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  event             Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  orderItems        OrderItem[]
+  tickets           Ticket[]
+
+  @@index([eventId])
+}
+
+// -----------------------------------------------------
+// ORDERS & TICKETS
+// -----------------------------------------------------
+model Order {
+  id          String      @id @default(uuid())
+  orderNumber String      @unique // e.g. "AVX-2026-0001"
+  userId      String
+  eventId     String
+  totalAmount Decimal     @db.Decimal(10, 2)
+  status      OrderStatus @default(PENDING)
+  expiresAt   DateTime?   // For checkout reservation timers
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  user        User        @relation(fields: [userId], references: [id])
+  event       Event       @relation(fields: [eventId], references: [id])
+  orderItems  OrderItem[]
+  tickets     Ticket[]
+
+  @@index([userId])
+  @@index([eventId])
+  @@index([orderNumber])
+}
+
+model OrderItem {
+  id           String     @id @default(uuid())
+  orderId      String
+  ticketTierId String
+  quantity     Int
+  unitPrice    Decimal    @db.Decimal(10, 2)
+  subtotal     Decimal    @db.Decimal(10, 2)
+
+  order        Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticketTier   TicketTier @relation(fields: [ticketTierId], references: [id])
+
+  @@index([orderId])
+}
+
+model Ticket {
+  id            String       @id @default(uuid())
+  ticketCode    String       @unique // Human-friendly code (e.g. "TX-A9B2-C3D4")
+  qrPayload     String       @unique // Secure QR verification string
+  orderId       String
+  ticketTierId  String
+  eventId       String
+  attendeeName  String?
+  attendeeEmail String?
+  status        TicketStatus @default(VALID)
+  checkedInAt   DateTime?
+  checkedInById String?
+
+  order         Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticketTier    TicketTier   @relation(fields: [ticketTierId], references: [id])
+  event         Event        @relation(fields: [eventId], references: [id])
+  checkedInBy   User?        @relation("CheckedInBy", fields: [checkedInById], references: [id])
+
+  @@index([ticketCode])
+  @@index([qrPayload])
+  @@index([eventId, status])
+  @@index([orderId])
+}
